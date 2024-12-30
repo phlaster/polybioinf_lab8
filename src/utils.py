@@ -2,7 +2,25 @@ import numpy as np
 import pandas as pd
 from Bio import SeqIO
 from tqdm import tqdm
-from argparse import ArgumentParser
+import multiprocessing
+from colorama import Fore, Style, init
+init(autoreset=True)
+
+def cout(text, color):
+    color_dict = {
+        'black': Fore.BLACK,
+        'red': Fore.RED,
+        'green': Fore.GREEN,
+        'yellow': Fore.YELLOW,
+        'blue': Fore.BLUE,
+        'magenta': Fore.MAGENTA,
+        'cyan': Fore.CYAN,
+        'white': Fore.WHITE,
+        'reset': Style.RESET_ALL
+    }
+    color_code = color_dict.get(color.lower(), Style.RESET_ALL)
+    print(color_code + text)
+
 
 def read_bed(file_path: str) -> pd.DataFrame:
     bed_cols = ['chromosome', 'start', 'end', 'name']
@@ -29,25 +47,45 @@ def write_bed(data_dict: dict, file_path: str) -> None:
                 f.write(f"{chrom}\t{s}\t{e}\n")
 
 
-def read_fasta(file_path, first_n=1):
+def read_fasta(file_path, first_n=99999):
     sequences = {
         record.id.split()[0] : record.seq
         for _, record in tqdm(
             zip(range(first_n), SeqIO.parse(file_path, 'fasta')),
-            desc="Reading FASTA file", total=first_n
+            desc="Reading FASTA file",
+            leave=False
         )
     }
     return sequences
 
 def sequences_to_arrays(sequences, mapping={'A': 0, 'C': 1, 'G': 2, 'T': 3}):
     array_dict = {}
-    for key, seq in tqdm(sequences.items(), desc="Transcripting strings to np.arrays"):
+    for key, seq in tqdm(sequences.items(), desc="Transcripting strings to np.arrays", leave=False):
         array_dict[key] =  np.array(
             [mapping[char] for char in seq],
             dtype=np.int8
         )
     return array_dict
 
+def _process_sequence(item):
+    mapping={'A': 0, 'C': 1, 'G': 2, 'T': 3}
+    key, seq = item
+    try:
+        array = np.array([mapping[char] for char in seq], dtype=np.int8)
+        return key, array
+    except KeyError as e:
+        print(f"Warning: Invalid character '{e.args[0]}' in sequence '{key}'. Skipping this sequence.")
+        return key, None
+
+def sequences_to_arrays_parallel(sequences, num_processes=1):
+    with multiprocessing.Pool(processes=num_processes) as pool:
+        results = pool.map(_process_sequence, sequences.items())
+    
+    array_dict = {}
+    for key, array in results:
+        if array is not None:
+            array_dict[key] = array
+    return array_dict
 
 def map_regions(fasta_dict, bed_df):
     """
@@ -65,7 +103,7 @@ def map_regions(fasta_dict, bed_df):
     bed_chroms = bed_df['chromosome'].unique()
     
     # Process chromosomes present in the BED file
-    for chrom in tqdm(bed_chroms, desc="Mapping chromosomes to genome regions"):
+    for chrom in tqdm(bed_chroms, desc="Mapping chromosomes to genome regions", leave=False):
         regions = bed_df[bed_df['chromosome'] == chrom].sort_values('start')
         chrom_seq = fasta_dict.get(chrom, '')
         seq_len = len(chrom_seq)
@@ -115,9 +153,12 @@ def mask_regions(fasta_dict, bed_df):
     bed_chroms = bed_df['chromosome'].unique()
 
     # Process chromosomes present in the BED file
-    for chrom in tqdm(bed_chroms, desc="Creating masks for chromosomes"):
+    for chrom in tqdm(bed_chroms, desc="Creating masks for chromosomes", leave=False):
         regions = bed_df[bed_df['chromosome'] == chrom].sort_values('start')
         chrom_seq = fasta_dict.get(chrom, '')
+        if not isinstance(chrom_seq, np.ndarray):
+            continue
+
         seq_len = len(chrom_seq)
         mask = np.zeros(seq_len, dtype=int)
 
@@ -139,14 +180,3 @@ def mask_regions(fasta_dict, bed_df):
         mask_dict[chrom] = mask
 
     return mask_dict
-
-
-def parse_args():
-    parser = ArgumentParser(description='Lab 8')
-    parser.add_argument('--fasta', required=True, help='Path to the fasta file.')
-    parser.add_argument('--bed', required=True, help='Path to the BED file.')
-    parser.add_argument('--out', required=True, help='Path to the output BED file.')
-    parser.add_argument('--n_chroms', type=int, default=1, help='Number of sequences to read.')
-    parser.add_argument('--cpu', type=int, default=1, help='Number of CPU cores to use.')
-    
-    return parser.parse_args()

@@ -90,7 +90,10 @@ function filter_ns(bed_df::DataFrame, seq_tuples::Vector{Tuple{String, String}})
 
 	bed_df = purge_cpg_with_ns(bed_df, seq_tuples)
 	# double check
-	@assert all.(!=('N'), vcat(values(extract_subsequences(bed_df, seq_tuples))...)) |> all "Bed regions must not contain 'N' characters!"
+	@assert all.(
+        !=('N'),
+        vcat(values(extract_subsequences(bed_df, seq_tuples))...)
+    ) |> all "Bed regions must not contain 'N' characters!"
 	
     chrom_to_seq = Dict{String, String}()
     for (header, seq) in seq_tuples
@@ -154,7 +157,7 @@ function main()
     end
     args = parse_args(s)
 
-    genome = [(header, uppercase(seq)) for (header, seq) in FastaReader(args["fasta_in"])]
+    genome = [(header, uppercase(seq)) for (header, seq) in FastaReader(args["fasta_in"]) if startswith(header, "NC_054")]
     bed_df = parse_bed_file(args["bed_in"])
     filtered_bed, filtered_genome = filter_ns(bed_df, genome)
     save_bed_to_disk(args["bed_out"], filtered_bed)

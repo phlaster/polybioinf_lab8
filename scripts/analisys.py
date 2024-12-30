@@ -7,40 +7,22 @@ from argparse import ArgumentParser
 from tqdm import tqdm
 from joblib import Parallel, delayed
 
-
 import sys
 import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
 import utils
 
-
 def parse_args():
     parser = ArgumentParser(description='Lab 8')
-    parser.add_argument('--bed_ref', required=True, help='Path to reference BED file.')
-    parser.add_argument('--bed_predicted', required=True, help='Path to predicted BED file.')
-    parser.add_argument('--hist', required=True, help='Path to histogram output')
+    parser.add_argument('--bed_in', required=True, help='Path to reference BED file.')
+    parser.add_argument('--bed_out', required=True, help='Path to predicted BED file.')
+    parser.add_argument('--hist_out', required=True, help='Path to histogram output')
     parser.add_argument('--cpu', type=int, default=1, help='Number of CPU cores to use.')
     return parser.parse_args()
 
-
-# def calculate_intersections(ground_truth, predictions, n_cpu=-1):
-#     def calculate_for_prediction(pred):
-#         chrom_matches = ground_truth[ground_truth['chromosome'] == pred['chromosome']]
-#         intersections = [
-#             max(0, min(truth['end'], pred['end']) - max(truth['start'], pred['start']))
-#             for _, truth in chrom_matches.iterrows()
-#             if max(truth['start'], pred['start']) < min(truth['end'], pred['end'])
-#         ]
-#         return intersections
-
-#     results = Parallel(n_jobs=n_cpu)(delayed(calculate_for_prediction)(pred) for _, pred in predictions.iterrows())
-#     intersections = [length for sublist in results for length in sublist]
-#     return intersections
-
-
 def plot_histogram_and_fit(intersections, filename):
-    plt.hist(intersections, bins=500, alpha=0.7, color='blue', density=True, label='Histogram')
+    plt.hist(intersections, bins=500, alpha=0.7, color='grey', density=True, label='Intersections')
     
     mean, std = norm.fit(intersections)
     loc, scale = cauchy.fit(intersections)
@@ -62,13 +44,12 @@ def plot_histogram_and_fit(intersections, filename):
     plt.close()
     return mean, std, loc, scale
 
+def ks_norm_test(mean, std, intersections):
+    statistic, p_value = kstest(intersections, 'norm', args=(mean, std))
+    return p_value
 
 def ks_cauchy_test(loc, scale, intersections):
     statistic, p_value = kstest(intersections, 'cauchy', args=(loc, scale))
-    return p_value
-
-def ks_cauchy_test(mean, std, intersections):
-    statistic, p_value = kstest(intersections, 'norm', args=(mean, std))
     return p_value
 
 def intersections_and_metrics(ground_truth, predictions, n_cpu=-1):
@@ -96,27 +77,23 @@ def intersections_and_metrics(ground_truth, predictions, n_cpu=-1):
 
     return intersections, specificity, sensitivity, f_score, tn, fp, fn, tp
 
-
-# Основной скрипт
 if __name__ == "__main__":
     args = parse_args()
 
-    bed_ref = args.bed_ref
-    bed_predicted = args.bed_predicted
-    cpu = args.cpu
-    hist = args.hist
-
-    ground_truth = utils.read_bed(bed_ref)
-    predictions = utils.read_bed(bed_predicted)
-    intersections, specificity, sensitivity, f_score, tn, fp, fn, tp = intersections_and_metrics(ground_truth, predictions, n_cpu=cpu)
-    mean, std, loc, scale = plot_histogram_and_fit(intersections, hist)
-    norm_sign = ks_cauchy_test(mean, std, intersections)
+    ground_truth = utils.read_bed(args.bed_in)
+    predictions = utils.read_bed(args.bed_out)
+    intersections, specificity, sensitivity, f_score, tn, fp, fn, tp = intersections_and_metrics(
+        ground_truth, predictions, n_cpu=args.cpu
+    )
+    mean, std, loc, scale = plot_histogram_and_fit(intersections, args.hist_out)
+    norm_sign = ks_norm_test(mean, std, intersections)
     kauchy_sign = ks_cauchy_test(loc, scale, intersections)
     
 
     print(f"Intersections calculated: {len(intersections)}")
-    print(f"Normal distributuion: {'Significant' if norm_sign < 0.05 else 'Not Significant'}, p-value={norm_sign:.2e}")
-    print(f"Kauchy distributuion: {'Significant' if kauchy_sign < 0.05 else 'Not Significant'}, p-value={kauchy_sign:.2e}")
+    print("Distributions tests:")
+    print(f"Normal: {'Significant' if norm_sign < 0.05 else 'Not Significant'}, p-value={norm_sign:.2e}")
+    print(f"Kauchy: {'Significant' if kauchy_sign < 0.05 else 'Not Significant'}, p-value={kauchy_sign:.2e}")
     print("Confusion Matrix:")
     print(f"\tTRUE\tFALSE\nPOS\t{tp}\t{fp}\nNEG\t{tn}\t{fn}")
     print(f"Specificity: {specificity:.2f}, Sensitivity: {sensitivity:.2f}, F-score: {f_score:.2f}")
